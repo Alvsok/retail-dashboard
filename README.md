@@ -219,7 +219,7 @@ retail-dashboard/
 
 ## Скриншот Telegram-уведомления
 
-*(добавить скриншот)*
+![Telegram alert](docs/telegram-alert.png)
 
 ---
 
