@@ -1,5 +1,7 @@
 .env
 venv/
+.vscode/
+requirements-dev.txt
 __pycache__/
 *.pyc
 *.pyo
