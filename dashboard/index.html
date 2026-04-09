@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Retail Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+      min-height: 100vh;
+    }
+
+    header {
+      padding: 20px 32px;
+      border-bottom: 1px solid #1e293b;
+      display: flex;
+      align-items: baseline;
+      gap: 12px;
+    }
+    header h1 { font-size: 22px; font-weight: 700; color: #f8fafc; }
+    header span { font-size: 13px; color: #475569; }
+
+    .container { padding: 28px 32px; max-width: 1280px; }
+
+    /* Stats row */
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 16px;
+      margin-bottom: 28px;
+    }
+    .card {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 12px;
+      padding: 20px 24px;
+    }
+    .card .label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      color: #64748b;
+    }
+    .card .value {
+      font-size: 34px;
+      font-weight: 700;
+      color: #f8fafc;
+      margin-top: 6px;
+      line-height: 1;
+    }
+    .card .sub { font-size: 12px; color: #475569; margin-top: 6px; }
+
+    /* Charts */
+    .charts {
+      display: grid;
+      grid-template-columns: 2fr 1fr;
+      gap: 16px;
+      margin-bottom: 28px;
+    }
+    @media (max-width: 900px) { .charts { grid-template-columns: 1fr; } }
+
+    .chart-card {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 12px;
+      padding: 20px 24px;
+    }
+    .chart-card h2 { font-size: 14px; font-weight: 600; color: #94a3b8; margin-bottom: 16px; }
+
+    /* Table */
+    .table-card {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 12px;
+      overflow: hidden;
+    }
+    .table-card h2 {
+      font-size: 14px;
+      font-weight: 600;
+      color: #94a3b8;
+      padding: 16px 24px;
+      border-bottom: 1px solid #334155;
+    }
+    table { width: 100%; border-collapse: collapse; }
+    th {
+      padding: 10px 16px;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: #475569;
+      text-align: left;
+      border-bottom: 1px solid #334155;
+    }
+    td {
+      padding: 13px 16px;
+      font-size: 13px;
+      border-bottom: 1px solid #0f172a;
+      vertical-align: middle;
+    }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: #243044; }
+
+    .badge {
+      display: inline-block;
+      padding: 2px 9px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 500;
+    }
+    .badge-instagram { background: #7c3aed22; color: #a78bfa; }
+    .badge-google    { background: #166534aa; color: #86efac; }
+    .badge-facebook  { background: #1d4ed844; color: #93c5fd; }
+    .badge-default   { background: #334155;   color: #94a3b8; }
+
+    .high { color: #4ade80; font-weight: 600; }
+    .spinner { text-align: center; padding: 60px; color: #475569; font-size: 14px; }
+    .error { color: #f87171; padding: 20px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Retail Dashboard</h1>
+    <span>RetailCRM · Supabase · live data</span>
+  </header>
+
+  <div class="container">
+    <div class="stats" id="stats">
+      <div class="spinner">Загрузка...</div>
+    </div>
+
+    <div class="charts">
+      <div class="chart-card">
+        <h2>Заказы по дням</h2>
+        <canvas id="ordersChart"></canvas>
+      </div>
+      <div class="chart-card">
+        <h2>По источникам</h2>
+        <canvas id="sourceChart"></canvas>
+      </div>
+    </div>
+
+    <div class="table-card">
+      <h2>Последние заказы</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>№</th>
+            <th>Клиент</th>
+            <th>Город</th>
+            <th>Сумма</th>
+            <th>Источник</th>
+            <th>Дата</th>
+          </tr>
+        </thead>
+        <tbody id="ordersBody">
+          <tr><td colspan="6" class="spinner">Загрузка...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    const SUPABASE_URL = 'https://sfnsalkvahrhecufxcah.supabase.co';
+    const SUPABASE_KEY = 'sb_publishable_LtmjKFr9eWpT4p8z1wUrDw_yPlwgztK';
+    const { createClient } = supabase;
+    const db = createClient(SUPABASE_URL, SUPABASE_KEY);
+
+    const CHART_DEFAULTS = {
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { grid: { color: '#1e3a5f' }, ticks: { color: '#64748b', font: { size: 11 } } },
+        y: { grid: { color: '#1e3a5f' }, ticks: { color: '#64748b', font: { size: 11 } } },
+      },
+    };
+
+    async function loadData() {
+      const { data: orders, error } = await db
+        .from('orders')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        document.getElementById('stats').innerHTML =
+          `<div class="error">Ошибка загрузки: ${error.message}</div>`;
+        return;
+      }
+
+      renderStats(orders);
+      renderOrdersChart(orders);
+      renderSourceChart(orders);
+      renderTable(orders.slice(0, 25));
+    }
+
+    function renderStats(orders) {
+      const total = orders.length;
+      const revenue = orders.reduce((s, o) => s + (o.total_sum || 0), 0);
+      const highValue = orders.filter(o => o.total_sum > 50000).length;
+      const avg = total ? revenue / total : 0;
+
+      document.getElementById('stats').innerHTML = `
+        <div class="card">
+          <div class="label">Всего заказов</div>
+          <div class="value">${total}</div>
+          <div class="sub">в базе данных</div>
+        </div>
+        <div class="card">
+          <div class="label">Выручка</div>
+          <div class="value">${fmtK(revenue)}</div>
+          <div class="sub">тысяч ₸</div>
+        </div>
+        <div class="card">
+          <div class="label">Средний чек</div>
+          <div class="value">${fmtK(avg)}</div>
+          <div class="sub">тысяч ₸ на заказ</div>
+        </div>
+        <div class="card">
+          <div class="label">Крупные заказы</div>
+          <div class="value" style="color:#4ade80">${highValue}</div>
+          <div class="sub">свыше 50 000 ₸</div>
+        </div>
+      `;
+    }
+
+    function renderOrdersChart(orders) {
+      const byDay = {};
+      orders.forEach(o => {
+        if (!o.created_at) return;
+        const day = o.created_at.slice(0, 10);
+        byDay[day] = (byDay[day] || 0) + 1;
+      });
+      const labels = Object.keys(byDay).sort();
+      const values = labels.map(l => byDay[l]);
+
+      new Chart(document.getElementById('ordersChart'), {
+        type: 'bar',
+        data: {
+          labels: labels.map(l => new Date(l + 'T00:00:00').toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })),
+          datasets: [{ label: 'Заказы', data: values, backgroundColor: '#3b82f6', borderRadius: 5 }],
+        },
+        options: { responsive: true, ...CHART_DEFAULTS },
+      });
+    }
+
+    function renderSourceChart(orders) {
+      const bySrc = {};
+      orders.forEach(o => {
+        const src = o.utm_source || 'прямой';
+        bySrc[src] = (bySrc[src] || 0) + 1;
+      });
+      const labels = Object.keys(bySrc);
+      const values = labels.map(l => bySrc[l]);
+      const colors = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#06b6d4'];
+
+      new Chart(document.getElementById('sourceChart'), {
+        type: 'doughnut',
+        data: {
+          labels,
+          datasets: [{ data: values, backgroundColor: colors, borderWidth: 2, borderColor: '#1e293b' }],
+        },
+        options: {
+          responsive: true,
+          plugins: {
+            legend: {
+              display: true,
+              position: 'bottom',
+              labels: { color: '#94a3b8', font: { size: 11 }, padding: 12 },
+            },
+          },
+        },
+      });
+    }
+
+    function renderTable(orders) {
+      if (!orders.length) {
+        document.getElementById('ordersBody').innerHTML =
+          '<tr><td colspan="6" class="spinner">Нет данных</td></tr>';
+        return;
+      }
+
+      document.getElementById('ordersBody').innerHTML = orders.map(o => {
+        const src = o.utm_source || '—';
+        const badgeClass = {
+          instagram: 'badge-instagram',
+          google: 'badge-google',
+          facebook: 'badge-facebook',
+        }[src] || 'badge-default';
+
+        const amountClass = o.total_sum > 50000 ? 'high' : '';
+        const dateStr = o.created_at
+          ? new Date(o.created_at).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit' })
+          : '—';
+
+        return `
+          <tr>
+            <td style="color:#475569">${o.crm_number || o.crm_id}</td>
+            <td>${o.customer_name || '—'}</td>
+            <td>${o.city || '—'}</td>
+            <td class="${amountClass}">${(o.total_sum || 0).toLocaleString('ru-RU')} ₸</td>
+            <td><span class="badge ${badgeClass}">${src}</span></td>
+            <td style="color:#64748b">${dateStr}</td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    function fmtK(n) { return (n / 1000).toFixed(1) + 'K'; }
+
+    loadData();
+  </script>
+</body>
+</html>
